@@ -645,6 +645,10 @@ class ConfigTest extends TestUtils {
             conf.getBytes("nulls.null")
         }
 
+        intercept[ConfigException.Null] {
+            conf.getMemorySize("nulls.null")
+        }
+
         // should throw WrongType if key is wrong type and not convertible
         intercept[ConfigException.WrongType] {
             conf.getInt("booleans.trueAgain")
@@ -674,6 +678,10 @@ class ConfigTest extends TestUtils {
             conf.getBytes("ints")
         }
 
+        intercept[ConfigException.WrongType] {
+            conf.getMemorySize("ints")
+        }
+
         // should throw BadPath on various bad paths
         intercept[ConfigException.BadPath] {
             conf.getInt(".bad")
@@ -699,6 +707,10 @@ class ConfigTest extends TestUtils {
 
         intercept[ConfigException.BadValue] {
             conf.getBytes("strings.a")
+        }
+
+        intercept[ConfigException.BadValue] {
+            conf.getMemorySize("strings.a")
         }
     }
 
@@ -757,6 +769,17 @@ class ConfigTest extends TestUtils {
             conf.getNanosecondsList("durations.secondsList").asScala)
         assertEquals(500L, conf.getMilliseconds("durations.halfSecond"))
 
+        // get durations as java.time.Duration
+        assertEquals(1000L, conf.getDuration("durations.second").toMillis)
+        assertEquals(asNanos(1), conf.getDuration("durations.second").toNanos)
+        assertEquals(1000L, conf.getDuration("durations.secondAsNumber").toMillis)
+        assertEquals(asNanos(1), conf.getDuration("durations.secondAsNumber").toNanos)
+        assertEquals(Seq(1000L, 2000L, 3000L, 4000L),
+            conf.getDurationList("durations.secondsList").asScala.map(_.toMillis))
+        assertEquals(Seq(asNanos(1), asNanos(2), asNanos(3), asNanos(4)),
+            conf.getDurationList("durations.secondsList").asScala.map(_.toNanos))
+        assertEquals(500L, conf.getDuration("durations.halfSecond").toMillis)
+
         def assertDurationAsTimeUnit(unit: TimeUnit): Unit = {
             def ms2unit(l: Long) = unit.convert(l, MILLISECONDS)
             def s2unit(i: Int) = unit.convert(i, SECONDS)
@@ -769,6 +792,8 @@ class ConfigTest extends TestUtils {
             assertEquals(Seq(1, 2, 3, 4) map s2unit,
                 conf.getDurationList("durations.secondsList", unit).asScala)
             assertEquals(ms2unit(500L), conf.getDuration("durations.halfSecond", unit))
+            assertEquals(ms2unit(1L), conf.getDuration("durations.millis", unit))
+            assertEquals(ms2unit(2L), conf.getDuration("durations.micros", unit))
         }
 
         assertDurationAsTimeUnit(NANOSECONDS)
@@ -785,6 +810,13 @@ class ConfigTest extends TestUtils {
         assertEquals(Seq(1024 * 1024L, 1024 * 1024L, 1024L * 1024L),
             conf.getBytesList("memsizes.megsList").asScala)
         assertEquals(512 * 1024L, conf.getBytes("memsizes.halfMeg"))
+
+        // should get size as a ConfigMemorySize
+        assertEquals(1024 * 1024L, conf.getMemorySize("memsizes.meg").toBytes)
+        assertEquals(1024 * 1024L, conf.getMemorySize("memsizes.megAsNumber").toBytes)
+        assertEquals(Seq(1024 * 1024L, 1024 * 1024L, 1024L * 1024L),
+            conf.getMemorySizeList("memsizes.megsList").asScala.map(_.toBytes))
+        assertEquals(512 * 1024L, conf.getMemorySize("memsizes.halfMeg").toBytes)
     }
 
     @Test
@@ -828,18 +860,27 @@ class ConfigTest extends TestUtils {
         val conf = ConfigFactory.load("test01")
 
         val o1 = conf.getValue("ints.fortyTwo").origin()
-        assertEquals("test01.conf: 3", o1.description)
+        // the checkout directory would be in between this startsWith and endsWith
+        assertTrue("description starts with resource '" + o1.description + "'", o1.description.startsWith("test01.conf @"))
+        assertTrue("description ends with url and line '" + o1.description + "'", o1.description.endsWith("/config/target/test-classes/test01.conf: 3"))
         assertEquals("test01.conf", o1.resource)
+        assertTrue("url ends with resource file", o1.url.getPath.endsWith("/config/target/test-classes/test01.conf"))
         assertEquals(3, o1.lineNumber)
 
         val o2 = conf.getValue("fromJson1").origin()
-        assertEquals("test01.json: 2", o2.description)
+        // the checkout directory would be in between this startsWith and endsWith
+        assertTrue("description starts with json resource '" + o2.description + "'", o2.description.startsWith("test01.json @"))
+        assertTrue("description of json resource ends with url and line '" + o2.description + "'", o2.description.endsWith("/config/target/test-classes/test01.json: 2"))
         assertEquals("test01.json", o2.resource)
+        assertTrue("url ends with json resource file", o2.url.getPath.endsWith("/config/target/test-classes/test01.json"))
         assertEquals(2, o2.lineNumber)
 
         val o3 = conf.getValue("fromProps.bool").origin()
-        assertEquals("test01.properties", o3.description)
+        // the checkout directory would be in between this startsWith and endsWith
+        assertTrue("description starts with props resource '" + o3.description + "'", o3.description.startsWith("test01.properties @"))
+        assertTrue("description of props resource ends with url '" + o3.description + "'", o3.description.endsWith("/config/target/test-classes/test01.properties"))
         assertEquals("test01.properties", o3.resource)
+        assertTrue("url ends with props resource file", o3.url.getPath.endsWith("/config/target/test-classes/test01.properties"))
         // we don't have line numbers for properties files
         assertEquals(-1, o3.lineNumber)
     }
@@ -1116,6 +1157,15 @@ class ConfigTest extends TestUtils {
         assertFalse("config with substitutions starts as not resolved", unresolved.isResolved)
         val resolved2 = unresolved.resolve()
         assertTrue("after resolution, config is now resolved", resolved2.isResolved)
+    }
+
+    @Test
+    def allowUnresolvedDoesAllowUnresolvedArrayElements() {
+        val values = ConfigFactory.parseString("unknown = [someVal], known = 42")
+        val unresolved = ConfigFactory.parseString("concat = [${unknown}[]], sibling = [${unknown}, ${known}]")
+        unresolved.resolve(ConfigResolveOptions.defaults().setAllowUnresolved(true))
+        unresolved.withFallback(values).resolve()
+        unresolved.resolveWith(values)
     }
 
     @Test

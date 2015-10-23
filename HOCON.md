@@ -1,3 +1,55 @@
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+**Table of Contents**  *generated with [DocToc](https://github.com/thlorenz/doctoc)*
+
+- [HOCON (Human-Optimized Config Object Notation)](#hocon-human-optimized-config-object-notation)
+  - [Goals / Background](#goals--background)
+  - [Definitions](#definitions)
+  - [Syntax](#syntax)
+    - [Unchanged from JSON](#unchanged-from-json)
+    - [Comments](#comments)
+    - [Omit root braces](#omit-root-braces)
+    - [Key-value separator](#key-value-separator)
+    - [Commas](#commas)
+    - [Whitespace](#whitespace)
+    - [Duplicate keys and object merging](#duplicate-keys-and-object-merging)
+    - [Unquoted strings](#unquoted-strings)
+    - [Multi-line strings](#multi-line-strings)
+    - [Value concatenation](#value-concatenation)
+      - [String value concatenation](#string-value-concatenation)
+      - [Array and object concatenation](#array-and-object-concatenation)
+      - [Note: Concatenation with whitespace and substitutions](#note-concatenation-with-whitespace-and-substitutions)
+      - [Note: Arrays without commas or newlines](#note-arrays-without-commas-or-newlines)
+    - [Path expressions](#path-expressions)
+    - [Paths as keys](#paths-as-keys)
+    - [Substitutions](#substitutions)
+      - [Self-Referential Substitutions](#self-referential-substitutions)
+      - [The `+=` field separator](#the--field-separator)
+      - [Examples of Self-Referential Substitutions](#examples-of-self-referential-substitutions)
+    - [Includes](#includes)
+      - [Include syntax](#include-syntax)
+      - [Include semantics: merging](#include-semantics-merging)
+      - [Include semantics: substitution](#include-semantics-substitution)
+      - [Include semantics: missing files](#include-semantics-missing-files)
+      - [Include semantics: file formats and extensions](#include-semantics-file-formats-and-extensions)
+      - [Include semantics: locating resources](#include-semantics-locating-resources)
+    - [Conversion of numerically-indexed objects to arrays](#conversion-of-numerically-indexed-objects-to-arrays)
+  - [MIME Type](#mime-type)
+  - [API Recommendations](#api-recommendations)
+    - [Automatic type conversions](#automatic-type-conversions)
+    - [Units format](#units-format)
+    - [Duration format](#duration-format)
+    - [Size in bytes format](#size-in-bytes-format)
+    - [Config object merging and file merging](#config-object-merging-and-file-merging)
+    - [Java properties mapping](#java-properties-mapping)
+    - [Conventional configuration files for JVM apps](#conventional-configuration-files-for-jvm-apps)
+    - [Conventional override by system properties](#conventional-override-by-system-properties)
+    - [Substitution fallback to environment variables](#substitution-fallback-to-environment-variables)
+    - [hyphen-separated vs. camelCase](#hyphen-separated-vs-camelcase)
+  - [Note on Java properties similarity](#note-on-java-properties-similarity)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 # HOCON (Human-Optimized Config Object Notation)
 
 This is an informal spec, but hopefully it's clear.
@@ -383,6 +435,15 @@ A common use of array concatenation is to add to paths:
     path = [ /bin ]
     path = ${path} [ /usr/bin ]
 
+#### Note: Concatenation with whitespace and substitutions
+
+When concatenating substitutions such as `${foo} ${bar}`, the
+substitutions may turn out to be strings (which makes the
+whitespace between them significant) or may turn out to be objects
+or lists (which makes it irrelevant). Unquoted whitespace must be
+ignored in between substitutions which resolve to objects or
+lists. Quoted whitespace should be an error.
+
 #### Note: Arrays without commas or newlines
 
 Arrays allow you to use newlines instead of commas, but not
@@ -575,12 +636,13 @@ If a substitution with the `${?foo}` syntax is undefined:
    be created. If the field would have overridden a previously-set
    value for the same field, then the previous value remains.
  - if it is an array element then the element should not be added.
- - if it is part of a value concatenation then it should become an
-   empty string.
+ - if it is part of a value concatenation with another string then
+   it should become an empty string; if part of a value
+   concatenation with an object or array it should become an empty
+   object or array.
  - `foo : ${?bar}` would avoid creating field `foo` if `bar` is
-   undefined, but `foo : ${?bar}${?baz}` would be a value
-   concatenation so if `bar` or `baz` are not defined, the result
-   is an empty string.
+   undefined. `foo : ${?bar}${?baz}` would also avoid creating the
+   field if _both_ `bar` and `baz` are undefined.
 
 Substitutions are only allowed in field values and array
 elements (value concatenations), they are not allowed in keys or
@@ -824,6 +886,15 @@ working with ordered maps rather than unordered maps, which is too
 constraining. Implementations only have to track order for
 duplicate instances of the same field (i.e. merges).
 
+Implementations must set both `a` and `b` to the same value in
+this case, however. In practice this means that all substitutions
+must be memoized (resolved once, with the result
+retained). Memoization should be keyed by the substitution
+"instance" (the specific occurrence of the `${}` expression)
+rather than by the path inside the `${}` expression, because
+substitutions may be resolved differently depending on their
+position in the file.
+
 ### Includes
 
 #### Include syntax
@@ -853,7 +924,7 @@ usual the comma may be omitted if there's a newline).
 
 If an unquoted `include` at the start of a key is followed by
 anything other than a single quoted string or the
-`url("")`/`file("")/`classpath("")` syntax, it is invalid and an
+`url("")`/`file("")`/`classpath("")` syntax, it is invalid and an
 error should be generated.
 
 There can be any amount of whitespace, including newlines, between
@@ -1076,6 +1147,11 @@ Implementations need not support files, Java resources, or URLs;
 and they need not support particular URL protocols. However, if
 they do support them they should do so as described above.
 
+Note that at present, if `url()`/`file()`/`classpath()` are
+specified, the included items are NOT interpreted relative to the
+including items. Relative-to-including-file paths only work with
+the heuristic `include "foo.conf"`. This may change in the future.
+
 ### Conversion of numerically-indexed objects to arrays
 
 In some file formats and contexts, such as Java properties files,
@@ -1199,9 +1275,9 @@ parsed as a number plus an optional unit string.
 The supported unit strings for duration are case sensitive and
 must be lowercase. Exactly these strings are supported:
 
- - `ns`, `nanosecond`, `nanoseconds`
- - `us`, `microsecond`, `microseconds`
- - `ms`, `millisecond`, `milliseconds`
+ - `ns`, `nano`, `nanos`, `nanosecond`, `nanoseconds`
+ - `us`, `micro`, `micros`, `microsecond`, `microseconds`
+ - `ms`, `milli`, `millis`, `millisecond`, `milliseconds`
  - `s`, `second`, `seconds`
  - `m`, `minute`, `minutes`
  - `h`, `hour`, `hours`
@@ -1263,6 +1339,13 @@ and the GNU tools such as `ls` map these to powers of two, so this
 spec copies that. You can certainly find examples of mapping these
 to powers of ten, though. If you don't like ambiguity, don't use
 the single-letter abbreviations.
+
+Note: any value in zetta/zebi or yotta/yobi will overflow a 64-bit
+integer, and of course large-enough values in any of the units may
+overflow. Most real-world APIs and apps will not support byte
+counts that overflow a 64-bit integer. The huge units are provided
+just to be complete but probably aren't useful in practice. At
+least not in 2014.
 
 ### Config object merging and file merging
 

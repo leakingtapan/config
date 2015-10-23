@@ -1,43 +1,92 @@
 import de.johoop.findbugs4sbt.FindBugs._
-import de.johoop.findbugs4sbt.ReportType
-import de.johoop.findbugs4sbt.Effort
-import de.johoop.jacoco4sbt._
-import JacocoPlugin._
+import de.johoop.findbugs4sbt.{ Effort, ReportType }
+import de.johoop.jacoco4sbt.JacocoPlugin.jacoco
+import com.typesafe.sbt.SbtScalariform
+import com.typesafe.sbt.SbtScalariform.ScalariformKeys
+import scalariform.formatter.preferences._
+import com.etsy.sbt.Checkstyle._
+
+SbtScalariform.scalariformSettings
+
+val formatPrefs = FormattingPreferences()
+  .setPreference(IndentSpaces, 4)
+
+ScalariformKeys.preferences in Compile := formatPrefs
+ScalariformKeys.preferences in Test := formatPrefs
 
 fork in test := true
-
 fork in run := true
-
 fork in run in Test := true
 
 autoScalaLibrary := false
-
 crossPaths := false
 
 libraryDependencies += "net.liftweb" %% "lift-json" % "2.5" % "test"
-
-libraryDependencies += "com.novocode" % "junit-interface" % "0.10-M4" % "test"
+libraryDependencies += "com.novocode" % "junit-interface" % "0.11" % "test"
 
 externalResolvers += "Scala Tools Snapshots" at "http://scala-tools.org/repo-snapshots/"
 
-seq(findbugsSettings : _*)
+checkstyleSettings
 
+CheckstyleTasks.checkstyleConfig := baseDirectory.value / "checkstyle-config.xml"
+
+CheckstyleTasks.checkstyle in Compile := {
+  val log = streams.value.log
+  (CheckstyleTasks.checkstyle in Compile).value
+  val resultFile = (target in Compile).value / "checkstyle-report.xml"
+  val results = scala.xml.XML.loadFile(resultFile)
+  val errorFiles = results \\ "checkstyle" \\ "file"
+
+  def errorFromXml(node: scala.xml.NodeSeq): (String, String, String) = {
+    val line: String = (node \ "@line" text)
+    val msg: String = (node \ "@message" text)
+    val source: String = (node \ "@source" text)
+    (line, msg, source)
+  }
+  def errorsFromXml(fileNode: scala.xml.NodeSeq): Seq[(String, String, String, String)] = {
+    val name: String = (fileNode \ "@name" text)
+    val errors = (fileNode \\ "error") map { e => errorFromXml(e) }
+    errors map { case (line, error, source) => (name, line, error, source) }
+  }
+
+  val errors = errorFiles flatMap { f => errorsFromXml(f) }
+
+  if (errors.nonEmpty) {
+    for (e <- errors) {
+      log.error(s"${e._1}:${e._2}: ${e._3} (from ${e._4})")
+    }
+    throw new RuntimeException(s"Checkstyle failed with ${errors.size} errors")
+  }
+  log.info("No errors from checkstyle")
+}
+
+// add checkstyle as a dependency of doc
+doc in Compile := {
+  (CheckstyleTasks.checkstyle in Compile).value
+  (doc in Compile).value
+}
+
+findbugsSettings
 findbugsReportType := Some(ReportType.Html)
+findbugsReportPath := Some(crossTarget.value / "findbugs.html")
+findbugsEffort := Effort.Maximum
+findbugsMaxMemory := 2000
 
-findbugsReportName := Some("findbugs.html")
+jacoco.settings
 
-findbugsEffort := Effort.High
-
-findbugsMaxMemory := 1000
-
-seq(jacoco.settings : _*)
-
-javacOptions in (Compile,compile) ++= Seq("-source", "1.6", "-target", "1.6", "-g")
+javacOptions in (Compile, compile) ++= Seq("-source", "1.6", "-target", "1.8",
+                                           "-g", "-Xlint:unchecked")
 
 // because we test some global state such as singleton caches,
 // we have to run tests in serial.
 parallelExecution in Test := false
 
-sources in (Compile, doc) := (sources in (Compile, doc)).value.filter(_.getParentFile.getName != "impl")
+javacOptions in (Compile, doc) ++= Seq("-group", s"Public API (version ${version.value})", "com.typesafe.config:com.typesafe.config.parser",
+                                       "-group", "Internal Implementation - Not ABI Stable", "com.typesafe.config.impl")
 
-JavaVersionCheck.javacVersionCheckSettings
+javadocSourceBaseUrl := {
+  for (gitHead <- com.typesafe.sbt.SbtGit.GitKeys.gitHeadCommit.value)
+    yield s"https://github.com/typesafehub/config/blob/$gitHead/config/src/main/java"
+}
+
+javaVersionPrefix in javaVersionCheck := Some("1.8")

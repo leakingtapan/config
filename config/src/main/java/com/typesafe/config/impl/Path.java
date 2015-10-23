@@ -3,8 +3,7 @@
  */
 package com.typesafe.config.impl;
 
-import java.util.Iterator;
-import java.util.List;
+import java.util.*;
 
 import com.typesafe.config.ConfigException;
 
@@ -141,6 +140,21 @@ final class Path {
         return pb.result();
     }
 
+    boolean startsWith(Path other) {
+        Path myRemainder = this;
+        Path otherRemainder = other;
+        if (otherRemainder.length() <= myRemainder.length()) {
+            while(otherRemainder != null) {
+                if (!otherRemainder.first().equals(myRemainder.first()))
+                    return false;
+                myRemainder = myRemainder.remainder();
+                otherRemainder = otherRemainder.remainder();
+            }
+            return true;
+        }
+        return false;
+    }
+
     @Override
     public boolean equals(Object other) {
         if (other instanceof Path) {
@@ -167,15 +181,7 @@ final class Path {
         if (length == 0)
             return false;
 
-        // if the path starts with something that could be a number,
-        // we need to quote it because the number could be invalid,
-        // for example it could be a hyphen with no digit afterward
-        // or the exponent "e" notation could be mangled.
-        char first = s.charAt(0);
-        if (!(Character.isLetter(first)))
-            return true;
-
-        for (int i = 1; i < length; ++i) {
+        for (int i = 0; i < length; ++i) {
             char c = s.charAt(i);
 
             if (Character.isLetterOrDigit(c) || c == '-' || c == '_')
@@ -221,6 +227,6 @@ final class Path {
     }
 
     static Path newPath(String path) {
-        return Parser.parsePath(path);
+        return PathParser.parsePath(path);
     }
 }

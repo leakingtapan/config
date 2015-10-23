@@ -56,9 +56,9 @@ class PathTest extends TestUtils {
             RenderTest("foo-bar", path("foo-bar")),
             RenderTest("foo_bar", path("foo_bar")),
             // starts with hyphen
-            RenderTest("\"-foo\"", path("-foo")),
+            RenderTest("-foo", path("-foo")),
             // starts with number
-            RenderTest("\"10foo\"", path("10foo")),
+            RenderTest("10foo", path("10foo")),
             // empty elements
             RenderTest("\"\".\"\"", path("", "")),
             // internal space
@@ -66,15 +66,15 @@ class PathTest extends TestUtils {
             // leading and trailing spaces
             RenderTest("\" foo \"", path(" foo ")),
             // trailing space only
-            RenderTest("\"foo \"", path("foo ")))
+            RenderTest("\"foo \"", path("foo ")),
             // numbers with decimal points
-            RenderTest("1.2", path("1", "2"))
-            RenderTest("1.2.3.4", path("1", "2", "3", "4"))
+            RenderTest("1.2", path("1", "2")),
+            RenderTest("1.2.3.4", path("1", "2", "3", "4")))
 
         for (t <- tests) {
             assertEquals(t.expected, t.path.render())
-            assertEquals(t.path, Parser.parsePath(t.expected))
-            assertEquals(t.path, Parser.parsePath(t.path.render()))
+            assertEquals(t.path, PathParser.parsePath(t.expected))
+            assertEquals(t.path, PathParser.parsePath(t.path.render()))
         }
     }
 
@@ -108,6 +108,14 @@ class PathTest extends TestUtils {
     def pathLast() {
         assertEquals("a", path("a").last())
         assertEquals("b", path("a", "b").last())
+    }
+
+    @Test
+    def pathStartsWith() {
+        assertTrue(path("a", "b", "c", "d").startsWith(path("a", "b")))
+        assertTrue(path("a", "b", "c", "d").startsWith(path("a", "b", "c", "d")))
+        assertFalse(path("a", "b", "c", "d").startsWith(path("b", "c", "d")))
+        assertFalse(path("a", "b", "c", "d").startsWith(path("invalidpath")))
     }
 
     @Test

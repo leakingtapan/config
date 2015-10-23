@@ -16,8 +16,10 @@ import java.util.List;
 import com.typesafe.config.ConfigException;
 import com.typesafe.config.ConfigOrigin;
 
-
-/** This is public just for the "config" package to use, don't touch it */
+/**
+ * Internal implementation detail, not ABI stable, do not touch.
+ * For use only by the {@link com.typesafe.config} package.
+ */
 final public class ConfigImplUtil {
     static boolean equalsHandlingNull(Object a, Object b) {
         if (a == null && b != null)
@@ -30,10 +32,10 @@ final public class ConfigImplUtil {
             return a.equals(b);
     }
 
-    /**
-     * This is public ONLY for use by the "config" package, DO NOT USE this ABI
-     * may change.
-     */
+    static boolean isC0Control(int codepoint) {
+      return (codepoint >= 0x0000 && codepoint <= 0x001F);
+    }
+
     public static String renderJsonString(String s) {
         StringBuilder sb = new StringBuilder();
         sb.append('"');
@@ -62,7 +64,7 @@ final public class ConfigImplUtil {
                 sb.append("\\t");
                 break;
             default:
-                if (Character.isISOControl(c))
+                if (isC0Control(c))
                     sb.append(String.format("\\u%04x", (int) c));
                 else
                     sb.append(c);
@@ -117,7 +119,6 @@ final public class ConfigImplUtil {
         }
     }
 
-    /** This is public just for the "config" package to use, don't touch it! */
     public static String unicodeTrim(String s) {
         // this is dumb because it looks like there aren't any whitespace
         // characters that need surrogate encoding. But, points for
@@ -166,7 +167,7 @@ final public class ConfigImplUtil {
         return s.substring(start, end);
     }
 
-    /** This is public just for the "config" package to use, don't touch it! */
+
     public static ConfigException extractInitializerError(ExceptionInInitializerError e) {
         Throwable cause = e.getCause();
         if (cause != null && cause instanceof ConfigException) {
@@ -192,26 +193,14 @@ final public class ConfigImplUtil {
         }
     }
 
-    /**
-     * This is public ONLY for use by the "config" package, DO NOT USE this ABI
-     * may change. You can use the version in ConfigUtil instead.
-     */
     public static String joinPath(String... elements) {
         return (new Path(elements)).render();
     }
 
-    /**
-     * This is public ONLY for use by the "config" package, DO NOT USE this ABI
-     * may change. You can use the version in ConfigUtil instead.
-     */
     public static String joinPath(List<String> elements) {
         return joinPath(elements.toArray(new String[0]));
     }
 
-    /**
-     * This is public ONLY for use by the "config" package, DO NOT USE this ABI
-     * may change. You can use the version in ConfigUtil instead.
-     */
     public static List<String> splitPath(String path) {
         Path p = Path.newPath(path);
         List<String> elements = new ArrayList<String>();
@@ -229,5 +218,19 @@ final public class ConfigImplUtil {
     public static void writeOrigin(ObjectOutputStream out, ConfigOrigin origin) throws IOException {
         SerializedConfigValue.writeOrigin(new DataOutputStream(out), (SimpleConfigOrigin) origin,
                 null);
+    }
+
+    static String toCamelCase(String originalName) {
+        String[] words = originalName.split("-+");
+        StringBuilder nameBuilder = new StringBuilder(originalName.length());
+        for (String word : words) {
+            if (nameBuilder.length() == 0) {
+                nameBuilder.append(word);
+            } else {
+                nameBuilder.append(word.substring(0, 1).toUpperCase());
+                nameBuilder.append(word.substring(1));
+            }
+        }
+        return nameBuilder.toString();
     }
 }

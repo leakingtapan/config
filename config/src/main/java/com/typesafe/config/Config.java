@@ -3,6 +3,7 @@
  */
 package com.typesafe.config;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -74,8 +75,9 @@ import java.util.concurrent.TimeUnit;
  * conceptually, {@code ConfigValue}s with a {@link ConfigValue#valueType()
  * valueType()} of {@link ConfigValueType#NULL NULL} exist in a
  * {@code ConfigObject}, while a {@code Config} treats null values as if they
- * were missing.
- * 
+ * were missing. (With the exception of two methods: {@link Config#hasPathOrNull}
+ * and {@link Config#getIsNull} let you detect <code>null</code> values.)
+ *
  * <p>
  * <strong>Getting configuration values</strong>
  * 
@@ -416,6 +418,47 @@ public interface Config extends ConfigMergeable {
     boolean hasPath(String path);
 
     /**
+     * Checks whether a value is present at the given path, even
+     * if the value is null. Most of the getters on
+     * <code>Config</code> will throw if you try to get a null
+     * value, so if you plan to call {@link #getValue(String)},
+     * {@link #getInt(String)}, or another getter you may want to
+     * use plain {@link #hasPath(String)} rather than this method.
+     *
+     * <p>
+     * To handle all three cases (unset, null, and a non-null value)
+     * the code might look like:
+     * <pre><code>
+     * if (config.hasPathOrNull(path)) {
+     *     if (config.getIsNull(path)) {
+     *        // handle null setting
+     *     } else {
+     *        // get and use non-null setting
+     *     }
+     * } else {
+     *     // handle entirely unset path
+     * }
+     * </code></pre>
+     *
+     * <p> However, the usual thing is to allow entirely unset
+     * paths to be a bug that throws an exception (because you set
+     * a default in your <code>reference.conf</code>), so in that
+     * case it's OK to call {@link #getIsNull(String)} without
+     * checking <code>hasPathOrNull</code> first.
+     *
+     * <p>
+     * Note that path expressions have a syntax and sometimes require quoting
+     * (see {@link ConfigUtil#joinPath} and {@link ConfigUtil#splitPath}).
+     *
+     * @param path
+     *            the path expression
+     * @return true if a value is present at the path, even if the value is null
+     * @throws ConfigException.BadPath
+     *             if the path expression is invalid
+     */
+    boolean hasPathOrNull(String path);
+
+    /**
      * Returns true if the {@code Config}'s root object contains no key-value
      * pairs.
      *
@@ -448,6 +491,33 @@ public interface Config extends ConfigMergeable {
     Set<Map.Entry<String, ConfigValue>> entrySet();
 
     /**
+     * Checks whether a value is set to null at the given path,
+     * but throws an exception if the value is entirely
+     * unset. This method will not throw if {@link
+     * #hasPathOrNull(String)} returned true for the same path, so
+     * to avoid any possible exception check
+     * <code>hasPathOrNull()</code> first.  However, an exception
+     * for unset paths will usually be the right thing (because a
+     * <code>reference.conf</code> should exist that has the path
+     * set, the path should never be unset unless something is
+     * broken).
+     *
+     * <p>
+     * Note that path expressions have a syntax and sometimes require quoting
+     * (see {@link ConfigUtil#joinPath} and {@link ConfigUtil#splitPath}).
+     *
+     * @param path
+     *            the path expression
+     * @return true if the value exists and is null, false if it
+     * exists and is not null
+     * @throws ConfigException.BadPath
+     *             if the path expression is invalid
+     * @throws ConfigException.Missing
+     *             if value is not set at all
+     */
+    boolean getIsNull(String path);
+
+    /**
      *
      * @param path
      *            path expression
@@ -471,6 +541,12 @@ public interface Config extends ConfigMergeable {
     Number getNumber(String path);
 
     /**
+     * Gets the integer at the given path. If the value at the
+     * path has a fractional (floating point) component, it
+     * will be discarded and only the integer part will be
+     * returned (it works like a "narrowing primitive conversion"
+     * in the Java language specification).
+     *
      * @param path
      *            path expression
      * @return the 32-bit integer value at the requested path
@@ -483,6 +559,12 @@ public interface Config extends ConfigMergeable {
     int getInt(String path);
 
     /**
+     * Gets the long integer at the given path.  If the value at
+     * the path has a fractional (floating point) component, it
+     * will be discarded and only the integer part will be
+     * returned (it works like a "narrowing primitive conversion"
+     * in the Java language specification).
+     *
      * @param path
      *            path expression
      * @return the 64-bit long value at the requested path
@@ -586,6 +668,28 @@ public interface Config extends ConfigMergeable {
     Long getBytes(String path);
 
     /**
+     * Gets a value as an amount of memory (parses special strings like "128M"). If
+     * the value is already a number, then it's left alone; if it's a string,
+     * it's parsed understanding unit suffixes such as "128K", as documented in
+     * the <a
+     * href="https://github.com/typesafehub/config/blob/master/HOCON.md">the
+     * spec</a>.
+     *
+     * @since 1.3.0
+     *
+     * @param path
+     *            path expression
+     * @return the value at the requested path, in bytes
+     * @throws ConfigException.Missing
+     *             if value is absent or null
+     * @throws ConfigException.WrongType
+     *             if value is not convertible to Long or String
+     * @throws ConfigException.BadValue
+     *             if value cannot be parsed as a size in bytes
+     */
+    ConfigMemorySize getMemorySize(String path);
+
+    /**
      * Get value as a duration in milliseconds. If the value is already a
      * number, then it's left alone; if it's a string, it's parsed understanding
      * units suffixes like "10m" or "5ns" as documented in the <a
@@ -652,6 +756,28 @@ public interface Config extends ConfigMergeable {
     long getDuration(String path, TimeUnit unit);
 
     /**
+     * Gets a value as a java.time.Duration. If the value is
+     * already a number, then it's taken as milliseconds; if it's
+     * a string, it's parsed understanding units suffixes like
+     * "10m" or "5ns" as documented in the <a
+     * href="https://github.com/typesafehub/config/blob/master/HOCON.md">the
+     * spec</a>. This method never returns null.
+     *
+     * @since 1.3.0
+     *
+     * @param path
+     *            path expression
+     * @return the duration value at the requested path
+     * @throws ConfigException.Missing
+     *             if value is absent or null
+     * @throws ConfigException.WrongType
+     *             if value is not convertible to Long or String
+     * @throws ConfigException.BadValue
+     *             if value cannot be parsed as a number of the given TimeUnit
+     */
+    Duration getDuration(String path);
+
+    /**
      * Gets a list value (with any element type) as a {@link ConfigList}, which
      * implements {@code java.util.List<ConfigValue>}. Throws if the path is
      * unset or null.
@@ -666,40 +792,189 @@ public interface Config extends ConfigMergeable {
      */
     ConfigList getList(String path);
 
+    /**
+     * Gets a list value with boolean elements.  Throws if the
+     * path is unset or null or not a list or contains values not
+     * convertible to boolean.
+     *
+     * @param path
+     *            the path to the list value.
+     * @return the list at the path
+     * @throws ConfigException.Missing
+     *             if value is absent or null
+     * @throws ConfigException.WrongType
+     *             if value is not convertible to a list of booleans
+     */
     List<Boolean> getBooleanList(String path);
 
+    /**
+     * Gets a list value with number elements.  Throws if the
+     * path is unset or null or not a list or contains values not
+     * convertible to number.
+     *
+     * @param path
+     *            the path to the list value.
+     * @return the list at the path
+     * @throws ConfigException.Missing
+     *             if value is absent or null
+     * @throws ConfigException.WrongType
+     *             if value is not convertible to a list of numbers
+     */
     List<Number> getNumberList(String path);
 
+    /**
+     * Gets a list value with int elements.  Throws if the
+     * path is unset or null or not a list or contains values not
+     * convertible to int.
+     *
+     * @param path
+     *            the path to the list value.
+     * @return the list at the path
+     * @throws ConfigException.Missing
+     *             if value is absent or null
+     * @throws ConfigException.WrongType
+     *             if value is not convertible to a list of ints
+     */
     List<Integer> getIntList(String path);
 
+    /**
+     * Gets a list value with long elements.  Throws if the
+     * path is unset or null or not a list or contains values not
+     * convertible to long.
+     *
+     * @param path
+     *            the path to the list value.
+     * @return the list at the path
+     * @throws ConfigException.Missing
+     *             if value is absent or null
+     * @throws ConfigException.WrongType
+     *             if value is not convertible to a list of longs
+     */
     List<Long> getLongList(String path);
 
+    /**
+     * Gets a list value with double elements.  Throws if the
+     * path is unset or null or not a list or contains values not
+     * convertible to double.
+     *
+     * @param path
+     *            the path to the list value.
+     * @return the list at the path
+     * @throws ConfigException.Missing
+     *             if value is absent or null
+     * @throws ConfigException.WrongType
+     *             if value is not convertible to a list of doubles
+     */
     List<Double> getDoubleList(String path);
 
+    /**
+     * Gets a list value with string elements.  Throws if the
+     * path is unset or null or not a list or contains values not
+     * convertible to string.
+     *
+     * @param path
+     *            the path to the list value.
+     * @return the list at the path
+     * @throws ConfigException.Missing
+     *             if value is absent or null
+     * @throws ConfigException.WrongType
+     *             if value is not convertible to a list of strings
+     */
     List<String> getStringList(String path);
 
+    /**
+     * Gets a list value with object elements.  Throws if the
+     * path is unset or null or not a list or contains values not
+     * convertible to <code>ConfigObject</code>.
+     *
+     * @param path
+     *            the path to the list value.
+     * @return the list at the path
+     * @throws ConfigException.Missing
+     *             if value is absent or null
+     * @throws ConfigException.WrongType
+     *             if value is not convertible to a list of objects
+     */
     List<? extends ConfigObject> getObjectList(String path);
 
+    /**
+     * Gets a list value with <code>Config</code> elements.
+     * Throws if the path is unset or null or not a list or
+     * contains values not convertible to <code>Config</code>.
+     *
+     * @param path
+     *            the path to the list value.
+     * @return the list at the path
+     * @throws ConfigException.Missing
+     *             if value is absent or null
+     * @throws ConfigException.WrongType
+     *             if value is not convertible to a list of configs
+     */
     List<? extends Config> getConfigList(String path);
 
+    /**
+     * Gets a list value with any kind of elements.  Throws if the
+     * path is unset or null or not a list. Each element is
+     * "unwrapped" (see {@link ConfigValue#unwrapped()}).
+     *
+     * @param path
+     *            the path to the list value.
+     * @return the list at the path
+     * @throws ConfigException.Missing
+     *             if value is absent or null
+     * @throws ConfigException.WrongType
+     *             if value is not convertible to a list
+     */
     List<? extends Object> getAnyRefList(String path);
 
+    /**
+     * Gets a list value with elements representing a size in
+     * bytes.  Throws if the path is unset or null or not a list
+     * or contains values not convertible to memory sizes.
+     *
+     * @param path
+     *            the path to the list value.
+     * @return the list at the path
+     * @throws ConfigException.Missing
+     *             if value is absent or null
+     * @throws ConfigException.WrongType
+     *             if value is not convertible to a list of memory sizes
+     */
     List<Long> getBytesList(String path);
 
     /**
+     * Gets a list, converting each value in the list to a memory size, using the
+     * same rules as {@link #getMemorySize(String)}.
+     *
+     * @since 1.3.0
+     * @param path
+     *            a path expression
+     * @return list of memory sizes
+     * @throws ConfigException.Missing
+     *             if value is absent or null
+     * @throws ConfigException.WrongType
+     *             if value is not convertible to a list of memory sizes
+     */
+    List<ConfigMemorySize> getMemorySizeList(String path);
+
+    /**
      * @deprecated  As of release 1.1, replaced by {@link #getDurationList(String, TimeUnit)}
+     * @param path the path
+     * @return list of millisecond values
      */
     @Deprecated List<Long> getMillisecondsList(String path);
 
     /**
      * @deprecated  As of release 1.1, replaced by {@link #getDurationList(String, TimeUnit)}
+     * @param path the path
+     * @return list of nanosecond values
      */
     @Deprecated List<Long> getNanosecondsList(String path);
 
     /**
      * Gets a list, converting each value in the list to a duration, using the
      * same rules as {@link #getDuration(String, TimeUnit)}.
-     * 
+     *
      * @since 1.2.0
      * @param path
      *            a path expression
@@ -708,6 +983,17 @@ public interface Config extends ConfigMergeable {
      * @return list of durations, in the requested units
      */
     List<Long> getDurationList(String path, TimeUnit unit);
+
+    /**
+     * Gets a list, converting each value in the list to a duration, using the
+     * same rules as {@link #getDuration(String)}.
+     *
+     * @since 1.3.0
+     * @param path
+     *            a path expression
+     * @return list of durations
+     */
+    List<Duration> getDurationList(String path);
 
     /**
      * Clone the config with only the given path (and its children) retained;

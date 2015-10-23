@@ -65,7 +65,9 @@ class SerializedConfigValue extends AbstractConfigValue implements Externalizabl
         ORIGIN_URL,
         ORIGIN_COMMENTS,
         ORIGIN_NULL_URL,
-        ORIGIN_NULL_COMMENTS;
+        ORIGIN_NULL_COMMENTS,
+        ORIGIN_RESOURCE,
+        ORIGIN_NULL_RESOURCE;
 
         static SerializedField forInt(int b) {
             if (b < values().length)
@@ -179,6 +181,9 @@ class SerializedConfigValue extends AbstractConfigValue implements Externalizabl
         case ORIGIN_URL:
             out.writeUTF((String) v);
             break;
+        case ORIGIN_RESOURCE:
+            out.writeUTF((String) v);
+            break;
         case ORIGIN_COMMENTS:
             @SuppressWarnings("unchecked")
             List<String> list = (List<String>) v;
@@ -189,6 +194,7 @@ class SerializedConfigValue extends AbstractConfigValue implements Externalizabl
             }
             break;
         case ORIGIN_NULL_URL: // FALL THRU
+        case ORIGIN_NULL_RESOURCE: // FALL THRU
         case ORIGIN_NULL_COMMENTS:
             // nothing to write out besides code and length
             break;
@@ -245,6 +251,10 @@ class SerializedConfigValue extends AbstractConfigValue implements Externalizabl
                 in.readInt(); // discard length
                 v = in.readUTF();
                 break;
+            case ORIGIN_RESOURCE:
+                in.readInt(); // discard length
+                v = in.readUTF();
+                break;
             case ORIGIN_COMMENTS:
                 in.readInt(); // discard length
                 int size = in.readInt();
@@ -255,6 +265,7 @@ class SerializedConfigValue extends AbstractConfigValue implements Externalizabl
                 v = list;
                 break;
             case ORIGIN_NULL_URL: // FALL THRU
+            case ORIGIN_NULL_RESOURCE: // FALL THRU
             case ORIGIN_NULL_COMMENTS:
                 // nothing to read besides code and length
                 in.readInt(); // discard length
@@ -342,7 +353,7 @@ class SerializedConfigValue extends AbstractConfigValue implements Externalizabl
             String sd = in.readUTF();
             return new ConfigDouble(origin, vd, sd);
         case STRING:
-            return new ConfigString(origin, in.readUTF());
+            return new ConfigString.Quoted(origin, in.readUTF());
         case LIST:
             int listSize = in.readInt();
             List<AbstractConfigValue> list = new ArrayList<AbstractConfigValue>(listSize);
@@ -485,5 +496,33 @@ class SerializedConfigValue extends AbstractConfigValue implements Externalizabl
     @Override
     protected SerializedConfigValue newCopy(ConfigOrigin origin) {
         throw shouldNotBeUsed();
+    }
+
+    @Override
+    public final String toString() {
+        return getClass().getSimpleName() + "(value=" + value + ",wasConfig=" + wasConfig + ")";
+    }
+
+    @Override
+    public boolean equals(Object other) {
+        // there's no reason we will ever call this equals(), but
+        // the one in AbstractConfigValue would explode due to
+        // calling unwrapped() above, so we just give some
+        // safe-to-call implementation to avoid breaking the
+        // contract of java.lang.Object
+        if (other instanceof SerializedConfigValue) {
+            return canEqual(other)
+                && (this.wasConfig == ((SerializedConfigValue) other).wasConfig)
+                && (this.value.equals(((SerializedConfigValue) other).value));
+        } else {
+            return false;
+        }
+    }
+
+    @Override
+    public int hashCode() {
+        int h = 41 * (41 + value.hashCode());
+        h = 41 * (h + (wasConfig ? 1 : 0));
+        return h;
     }
 }

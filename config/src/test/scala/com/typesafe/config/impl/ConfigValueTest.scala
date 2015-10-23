@@ -14,6 +14,7 @@ import com.typesafe.config.ConfigList
 import com.typesafe.config.ConfigException
 import com.typesafe.config.ConfigValueType
 import com.typesafe.config.ConfigOrigin
+import com.typesafe.config.ConfigRenderOptions
 import com.typesafe.config.ConfigValueFactory
 import com.typesafe.config.ConfigFactory
 
@@ -212,13 +213,47 @@ class ConfigValueTest extends TestUtils {
     }
 
     @Test
-    def configObjectSerializable() {
+    def java6ConfigObjectSerializable() {
         val expectedSerialization = "" +
             "ACED0005_s_r00_._c_o_m_._t_y_p_e_s_a_f_e_._c_o_n_f_i_g_._i_m_p_l_._S_e_r_i_a_l_i" +
             "_z_e_d_C_o_n_f_i_g_V_a_l_u_e00000000000000010C0000_x_p_w_z02000000_n050000001906" +
             "0000000D000B_f_a_k_e_ _o_r_i_g_i_n0900000001000104000000_J07000000030001_a050000" +
             "000101040000000802000000010001_1010001_c050000000101040000000802000000030001_301" +
             "0001_b050000000101040000000802000000020001_2010103000000010001_x"
+
+        val aMap = configMap("a" -> 1, "b" -> 2, "c" -> 3)
+        val a = new SimpleConfigObject(fakeOrigin(), aMap)
+        val b = checkSerializableOldFormat(expectedSerialization, a)
+        assertEquals(1, b.toConfig.getInt("a"))
+        // check that deserialized Config and ConfigObject refer to each other
+        assertTrue(b.toConfig.root eq b)
+    }
+
+    @Test
+    def java6ConfigConfigSerializable() {
+        val expectedSerialization = "" +
+            "ACED0005_s_r00_._c_o_m_._t_y_p_e_s_a_f_e_._c_o_n_f_i_g_._i_m_p_l_._S_e_r_i_a_l_i" +
+            "_z_e_d_C_o_n_f_i_g_V_a_l_u_e00000000000000010C0000_x_p_w_z02000000_n050000001906" +
+            "0000000D000B_f_a_k_e_ _o_r_i_g_i_n0900000001000104000000_J07000000030001_a050000" +
+            "000101040000000802000000010001_1010001_c050000000101040000000802000000030001_301" +
+            "0001_b050000000101040000000802000000020001_2010103000000010101_x"
+
+        val aMap = configMap("a" -> 1, "b" -> 2, "c" -> 3)
+        val a = new SimpleConfigObject(fakeOrigin(), aMap)
+        val b = checkSerializableOldFormat(expectedSerialization, a.toConfig())
+        assertEquals(1, b.getInt("a"))
+        // check that deserialized Config and ConfigObject refer to each other
+        assertTrue(b.root.toConfig eq b)
+    }
+
+    @Test
+    def configObjectSerializable() {
+        val expectedSerialization = "" +
+            "ACED0005_s_r00_._c_o_m_._t_y_p_e_s_a_f_e_._c_o_n_f_i_g_._i_m_p_l_._S_e_r_i_a_l_i" +
+            "_z_e_d_C_o_n_f_i_g_V_a_l_u_e00000000000000010C0000_x_p_w_z02000000_n050000001906" +
+            "0000000D000B_f_a_k_e_ _o_r_i_g_i_n0900000001000104000000_J07000000030001_a050000" +
+            "000101040000000802000000010001_1010001_b050000000101040000000802000000020001_201" +
+            "0001_c050000000101040000000802000000030001_3010103000000010001_x"
 
         val aMap = configMap("a" -> 1, "b" -> 2, "c" -> 3)
         val a = new SimpleConfigObject(fakeOrigin(), aMap)
@@ -234,8 +269,8 @@ class ConfigValueTest extends TestUtils {
             "ACED0005_s_r00_._c_o_m_._t_y_p_e_s_a_f_e_._c_o_n_f_i_g_._i_m_p_l_._S_e_r_i_a_l_i" +
             "_z_e_d_C_o_n_f_i_g_V_a_l_u_e00000000000000010C0000_x_p_w_z02000000_n050000001906" +
             "0000000D000B_f_a_k_e_ _o_r_i_g_i_n0900000001000104000000_J07000000030001_a050000" +
-            "000101040000000802000000010001_1010001_c050000000101040000000802000000030001_301" +
-            "0001_b050000000101040000000802000000020001_2010103000000010101_x"
+            "000101040000000802000000010001_1010001_b050000000101040000000802000000020001_201" +
+            "0001_c050000000101040000000802000000030001_3010103000000010101_x"
 
         val aMap = configMap("a" -> 1, "b" -> 2, "c" -> 3)
         val a = new SimpleConfigObject(fakeOrigin(), aMap)
@@ -663,8 +698,8 @@ class ConfigValueTest extends TestUtils {
     def configOriginFileAndLine() {
         val hasFilename = SimpleConfigOrigin.newFile("foo")
         val noFilename = SimpleConfigOrigin.newSimple("bar")
-        val filenameWithLine = hasFilename.setLineNumber(3)
-        val noFilenameWithLine = noFilename.setLineNumber(4)
+        val filenameWithLine = hasFilename.withLineNumber(3)
+        val noFilenameWithLine = noFilename.withLineNumber(4)
 
         assertEquals("foo", hasFilename.filename())
         assertEquals("foo", filenameWithLine.filename())
@@ -862,14 +897,15 @@ class ConfigValueTest extends TestUtils {
             SimpleConfigOrigin.newSimple("foo"),
             SimpleConfigOrigin.newFile("/tmp/blahblah"),
             SimpleConfigOrigin.newURL(new URL("http://example.com")),
-            SimpleConfigOrigin.newResource("myresource"))
+            SimpleConfigOrigin.newResource("myresource"),
+            SimpleConfigOrigin.newResource("myresource", new URL("file://foo/bar")))
         val combos = bases.flatMap({
             base =>
                 Seq(
-                    (base, base.setComments(Seq("this is a comment", "another one").asJava)),
-                    (base, base.setComments(null)),
-                    (base, base.setLineNumber(41)),
-                    (base, SimpleConfigOrigin.mergeOrigins(base.setLineNumber(10), base.setLineNumber(20))))
+                    (base, base.withComments(Seq("this is a comment", "another one").asJava)),
+                    (base, base.withComments(null)),
+                    (base, base.withLineNumber(41)),
+                    (base, SimpleConfigOrigin.mergeOrigins(base.withLineNumber(10), base.withLineNumber(20))))
         }) ++
             bases.sliding(2).map({ seq => (seq.head, seq.tail.head) }) ++
             bases.sliding(3).map({ seq => (seq.head, seq.tail.tail.head) }) ++
@@ -903,5 +939,33 @@ class ConfigValueTest extends TestUtils {
             assertEquals(middle(v), middle(deserialized))
             assertEquals(bottom(v), bottom(deserialized))
         }
+    }
+
+    @Test
+    def renderWithNewlinesInDescription(): Unit = {
+        val v = ConfigValueFactory.fromAnyRef(89, "this is a description\nwith some\nnewlines")
+        val list = new SimpleConfigList(SimpleConfigOrigin.newSimple("\n5\n6\n7\n"),
+            java.util.Collections.singletonList(v.asInstanceOf[AbstractConfigValue]))
+        val conf = ConfigFactory.empty().withValue("bar", list)
+        val rendered = conf.root.render()
+        def assertHas(s: String): Unit =
+            assertTrue(s"has ${s.replace("\n", "\\n")} in it", rendered.contains(s))
+        assertHas("is a description\n")
+        assertHas("with some\n")
+        assertHas("newlines\n")
+        assertHas("#\n")
+        assertHas("5\n")
+        assertHas("6\n")
+        assertHas("7\n")
+        val parsed = ConfigFactory.parseString(rendered)
+
+        assertEquals(conf, parsed)
+    }
+
+    @Test
+    def renderSorting(): Unit = {
+        val config = parseConfig("""0=a,1=b,2=c,3=d,10=e,20=f,30=g""")
+        val rendered = config.root.render(ConfigRenderOptions.concise())
+        assertEquals("""{"0":"a","1":"b","2":"c","3":"d","10":"e","20":"f","30":"g"}""", rendered)
     }
 }

@@ -142,12 +142,18 @@ final class PropertiesParser {
             Object rawValue = pathMap.get(path);
             AbstractConfigValue value;
             if (convertedFromProperties) {
-                value = new ConfigString(origin, (String) rawValue);
+                if (rawValue instanceof String) {
+                    value = new ConfigString.Quoted(origin, (String) rawValue);
+                } else {
+                    // silently ignore non-string values in Properties
+                    value = null;
+                }
             } else {
                 value = ConfigImpl.fromAnyRef(pathMap.get(path), origin,
                         FromMapMode.KEYS_ARE_PATHS);
             }
-            parent.put(last, value);
+            if (value != null)
+                parent.put(last, value);
         }
 
         /*

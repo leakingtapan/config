@@ -18,7 +18,7 @@ import com.typesafe.config.ConfigRenderOptions;
 import com.typesafe.config.ConfigValue;
 import com.typesafe.config.ConfigValueType;
 
-final class SimpleConfigList extends AbstractConfigValue implements ConfigList, Serializable {
+final class SimpleConfigList extends AbstractConfigValue implements ConfigList, Container, Serializable {
 
     private static final long serialVersionUID = 2L;
 
@@ -61,6 +61,23 @@ final class SimpleConfigList extends AbstractConfigValue implements ConfigList, 
         return ResolveStatus.fromBoolean(resolved);
     }
 
+    @Override
+    public SimpleConfigList replaceChild(AbstractConfigValue child, AbstractConfigValue replacement) {
+        List<AbstractConfigValue> newList = replaceChildInList(value, child, replacement);
+        if (newList == null) {
+            return null;
+        } else {
+            // we use the constructor flavor that will recompute the resolve
+            // status
+            return new SimpleConfigList(origin(), newList);
+        }
+    }
+
+    @Override
+    public boolean hasDescendant(AbstractConfigValue descendant) {
+        return hasDescendantInList(value, descendant);
+    }
+
     private SimpleConfigList modify(NoExceptionsModifier modifier, ResolveStatus newResolveStatus) {
         try {
             return modifyMayThrow(modifier, newResolveStatus);
@@ -98,31 +115,48 @@ final class SimpleConfigList extends AbstractConfigValue implements ConfigList, 
         }
 
         if (changed != null) {
-            return new SimpleConfigList(origin(), changed, newResolveStatus);
+            if (newResolveStatus != null) {
+                return new SimpleConfigList(origin(), changed, newResolveStatus);
+            } else {
+                return new SimpleConfigList(origin(), changed);
+            }
         } else {
             return this;
         }
     }
 
+    private static class ResolveModifier implements Modifier {
+        ResolveContext context;
+        final ResolveSource source;
+        ResolveModifier(ResolveContext context, ResolveSource source) {
+            this.context = context;
+            this.source = source;
+        }
+
+        @Override
+        public AbstractConfigValue modifyChildMayThrow(String key, AbstractConfigValue v)
+                    throws NotPossibleToResolve {
+            ResolveResult<? extends AbstractConfigValue> result = context.resolve(v, source);
+            context = result.context;
+            return result.value;
+            }
+    }
+
     @Override
-    SimpleConfigList resolveSubstitutions(final ResolveContext context) throws NotPossibleToResolve {
+    ResolveResult<? extends SimpleConfigList> resolveSubstitutions(ResolveContext context, ResolveSource source)
+            throws NotPossibleToResolve {
         if (resolved)
-            return this;
+            return ResolveResult.make(context, this);
 
         if (context.isRestrictedToChild()) {
             // if a list restricts to a child path, then it has no child paths,
             // so nothing to do.
-            return this;
+            return ResolveResult.make(context, this);
         } else {
             try {
-                return modifyMayThrow(new Modifier() {
-                    @Override
-                    public AbstractConfigValue modifyChildMayThrow(String key, AbstractConfigValue v)
-                            throws NotPossibleToResolve {
-                        return context.resolve(v);
-                    }
-
-                }, ResolveStatus.RESOLVED);
+                ResolveModifier modifier = new ResolveModifier(context, source.pushParent(this));
+                SimpleConfigList value = modifyMayThrow(modifier, context.options().getAllowUnresolved() ? null : ResolveStatus.RESOLVED);
+                return ResolveResult.make(modifier.context, value);
             } catch (NotPossibleToResolve e) {
                 throw e;
             } catch (RuntimeException e) {
@@ -154,7 +188,8 @@ final class SimpleConfigList extends AbstractConfigValue implements ConfigList, 
         // note that "origin" is deliberately NOT part of equality
         if (other instanceof SimpleConfigList) {
             // optimization to avoid unwrapped() for two ConfigList
-            return canEqual(other) && value.equals(((SimpleConfigList) other).value);
+            return canEqual(other)
+                    && (value == ((SimpleConfigList) other).value || value.equals(((SimpleConfigList) other).value));
         } else {
             return false;
         }
@@ -176,10 +211,15 @@ final class SimpleConfigList extends AbstractConfigValue implements ConfigList, 
                 sb.append('\n');
             for (AbstractConfigValue v : value) {
                 if (options.getOriginComments()) {
-                    indent(sb, indent + 1, options);
-                    sb.append("# ");
-                    sb.append(v.origin().description());
-                    sb.append("\n");
+                    String[] lines = v.origin().description().split("\n");
+                    for (String l : lines) {
+                        indent(sb, indent + 1, options);
+                        sb.append('#');
+                        if (!l.isEmpty())
+                            sb.append(' ');
+                        sb.append(l);
+                        sb.append("\n");
+                    }
                 }
                 if (options.getComments()) {
                     for (String comment : v.origin().comments()) {
@@ -415,5 +455,10 @@ final class SimpleConfigList extends AbstractConfigValue implements ConfigList, 
     // serialization all goes through SerializedConfigValue
     private Object writeReplace() throws ObjectStreamException {
         return new SerializedConfigValue(this);
+    }
+
+    @Override
+    public SimpleConfigList withOrigin(ConfigOrigin origin) {
+        return (SimpleConfigList) super.withOrigin(origin);
     }
 }

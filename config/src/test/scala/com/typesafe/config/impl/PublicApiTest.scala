@@ -14,6 +14,7 @@ import scala.collection.mutable
 import equiv03.SomethingInEquiv03
 import java.io.StringReader
 import java.net.URL
+import java.time.Duration
 
 class PublicApiTest extends TestUtils {
     @Test
@@ -94,9 +95,17 @@ class PublicApiTest extends TestUtils {
 
     private def testFromValue(expectedValue: ConfigValue, createFrom: AnyRef) {
         assertEquals(expectedValue, ConfigValueFactory.fromAnyRef(createFrom))
-        assertEquals(defaultValueDesc, ConfigValueFactory.fromAnyRef(createFrom).origin().description())
+
         assertEquals(expectedValue, ConfigValueFactory.fromAnyRef(createFrom, "foo"))
-        assertEquals("foo", ConfigValueFactory.fromAnyRef(createFrom, "foo").origin().description())
+
+        // description is ignored for createFrom that is already a ConfigValue
+        createFrom match {
+            case c: ConfigValue =>
+                assertEquals(c.origin().description(), ConfigValueFactory.fromAnyRef(createFrom).origin().description())
+            case _ =>
+                assertEquals(defaultValueDesc, ConfigValueFactory.fromAnyRef(createFrom).origin().description())
+                assertEquals("foo", ConfigValueFactory.fromAnyRef(createFrom, "foo").origin().description())
+        }
     }
 
     @Test
@@ -167,6 +176,39 @@ class PublicApiTest extends TestUtils {
 
         assertEquals("hardcoded value", ConfigValueFactory.fromIterable(List(1, 2, 3).asJava).origin().description())
         assertEquals("foo", ConfigValueFactory.fromIterable(treeSet, "foo").origin().description())
+    }
+
+    @Test
+    def fromConfigMemorySize() {
+        testFromValue(longValue(1024), ConfigMemorySize.ofBytes(1024));
+        testFromValue(longValue(512), ConfigMemorySize.ofBytes(512));
+    }
+
+    @Test
+    def fromDuration() {
+        testFromValue(longValue(1000), Duration.ofMillis(1000));
+        testFromValue(longValue(1000 * 60 * 60 * 24), Duration.ofDays(1));
+    }
+
+    @Test
+    def fromExistingConfigValue() {
+        testFromValue(longValue(1000), longValue(1000));
+        testFromValue(stringValue("foo"), stringValue("foo"));
+
+        val aMapValue = new SimpleConfigObject(fakeOrigin(),
+            Map("a" -> 1, "b" -> 2, "c" -> 3).mapValues(intValue(_): AbstractConfigValue).asJava)
+
+        testFromValue(aMapValue, aMapValue)
+    }
+
+    @Test
+    def fromExistingJavaListOfConfigValue() {
+        // you can mix "unwrapped" List with ConfigValue elements
+        val list = List(longValue(1), longValue(2), longValue(3)).asJava
+        testFromValue(new SimpleConfigList(fakeOrigin(), List(longValue(1): AbstractConfigValue,
+            longValue(2): AbstractConfigValue,
+            longValue(3): AbstractConfigValue).asJava),
+            list);
     }
 
     @Test
@@ -519,8 +561,8 @@ class PublicApiTest extends TestUtils {
         // check that each value has its own ConfigOrigin
         val v1 = conf.getValue("ints.fortyTwo")
         val v2 = conf.getValue("test-lib.fromTestLib")
-        assertEquals("test01.conf", v1.origin.resource)
-        assertEquals("test01.conf", v2.origin.resource)
+        assertEquals("v1 has right origin resource", "test01.conf", v1.origin.resource)
+        assertEquals("v2 has right origin resource", "test01.conf", v2.origin.resource)
         assertEquals(v1.origin.resource, v2.origin.resource)
         assertFalse("same urls in " + v1.origin + " " + v2.origin, v1.origin.url == v2.origin.url)
         assertFalse(v1.origin.filename == v2.origin.filename)
@@ -634,6 +676,7 @@ class PublicApiTest extends TestUtils {
                 ConfigFactory.parseResourcesAnySyntax(loaderA1, "reference", ConfigParseOptions.defaults()),
                 ConfigFactory.load(loaderA1, "application"),
                 ConfigFactory.load(loaderA1, "application", ConfigParseOptions.defaults(), ConfigResolveOptions.defaults()),
+                ConfigFactory.load(loaderA1, "application", ConfigParseOptions.defaults(), ConfigResolveOptions.defaults()),
                 ConfigFactory.load(loaderA1, ConfigFactory.parseString("")),
                 ConfigFactory.load(loaderA1, ConfigFactory.parseString(""), ConfigResolveOptions.defaults()),
                 ConfigFactory.defaultReference(loaderA1))
@@ -716,7 +759,8 @@ class PublicApiTest extends TestUtils {
                 ConfigFactory.parseResources(loaderA1, "application.conf", ConfigParseOptions.defaults()),
                 ConfigFactory.parseResourcesAnySyntax(loaderA1, "application", ConfigParseOptions.defaults()),
                 ConfigFactory.load(loaderA1, "application"),
-                ConfigFactory.load(loaderA1, "application", ConfigParseOptions.defaults(), ConfigResolveOptions.defaults()))
+                ConfigFactory.load(loaderA1, "application", ConfigParseOptions.defaults(), ConfigResolveOptions.defaults()),
+                ConfigFactory.defaultApplication(loaderA1))
         ) {
             assertEquals(1, c.getInt("a"))
             assertFalse("no b", c.hasPath("b"))
@@ -727,6 +771,8 @@ class PublicApiTest extends TestUtils {
         for (
             c <- Seq(ConfigFactory.parseResources("application.conf", withLoader),
                 ConfigFactory.parseResourcesAnySyntax("application", withLoader),
+                ConfigFactory.defaultApplication(withLoader),
+                ConfigFactory.load(withLoader, ConfigResolveOptions.defaults()),
                 ConfigFactory.load("application", withLoader, ConfigResolveOptions.defaults()))
         ) {
             assertEquals(1, c.getInt("a"))
@@ -740,6 +786,7 @@ class PublicApiTest extends TestUtils {
                 ConfigFactory.parseResources("application.conf", ConfigParseOptions.defaults()),
                 ConfigFactory.parseResourcesAnySyntax("application", ConfigParseOptions.defaults()),
                 ConfigFactory.load("application"),
+                ConfigFactory.defaultApplication(),
                 ConfigFactory.load("application", ConfigParseOptions.defaults(), ConfigResolveOptions.defaults()))
         ) {
             assertFalse("no a", c.hasPath("a"))
@@ -754,6 +801,7 @@ class PublicApiTest extends TestUtils {
                     ConfigFactory.parseResources("application.conf", ConfigParseOptions.defaults()),
                     ConfigFactory.parseResourcesAnySyntax("application", ConfigParseOptions.defaults()),
                     ConfigFactory.load("application"),
+                    ConfigFactory.defaultApplication(),
                     ConfigFactory.load("application", ConfigParseOptions.defaults(), ConfigResolveOptions.defaults()))
             ) {
                 assertEquals(1, c.getInt("a"))
@@ -888,7 +936,7 @@ class PublicApiTest extends TestUtils {
     def exceptionSerializable() {
         // ArrayList is a serialization problem so we want to cover it in tests
         val comments = new java.util.ArrayList(List("comment 1", "comment 2").asJava)
-        val e = new ConfigException.WrongType(SimpleConfigOrigin.newSimple("an origin").setComments(comments),
+        val e = new ConfigException.WrongType(SimpleConfigOrigin.newSimple("an origin").withComments(comments),
             "this is a message", new RuntimeException("this is a cause"))
         val eCopy = checkSerializableNoMeaningfulEquals(e)
         assertTrue("messages equal after deserialize", e.getMessage.equals(eCopy.getMessage))
@@ -904,6 +952,17 @@ class PublicApiTest extends TestUtils {
         assertTrue("messages equal after deserialize", e.getMessage.equals(eCopy.getMessage))
         assertTrue("cause messages equal after deserialize", e.getCause().getMessage.equals(eCopy.getCause().getMessage))
         assertTrue("origin null after deserialize", e.origin() == null)
+    }
+
+    @Test
+    def exceptionSerializableWithWrongType() {
+        val e = intercept[ConfigException.WrongType] {
+            ConfigValueFactory.fromAnyRef(Map("item" -> "uhoh, fail").asJava) match {
+                case o: ConfigObject => o.toConfig.getStringList("item")
+            }
+        }
+        val eCopy = checkSerializableNoMeaningfulEquals(e)
+        assertTrue("messages equal after deserialize", e.getMessage.equals(eCopy.getMessage))
     }
 
     @Test
@@ -977,5 +1036,70 @@ class PublicApiTest extends TestUtils {
         intercept[ConfigException.NotResolved] {
             conf.getInt("b")
         }
+    }
+
+    @Test
+    def heuristicIncludeChecksClasspath(): Unit = {
+        // from https://github.com/typesafehub/config/issues/188
+        withScratchDirectory("heuristicIncludeChecksClasspath") { dir =>
+            val f = new File(dir, "foo.conf")
+            writeFile(f, """
+include "onclasspath"
+""")
+            val conf = ConfigFactory.parseFile(f)
+            assertEquals(42, conf.getInt("onclasspath"))
+        }
+    }
+
+    @Test
+    def fileIncludeStatements(): Unit = {
+        val file = resourceFile("file-include.conf")
+        val conf = ConfigFactory.parseFile(file)
+        assertEquals("got file-include.conf", 41, conf.getInt("base"))
+        assertEquals("got subdir/foo.conf", 42, conf.getInt("foo"))
+        assertEquals("got bar.conf", 43, conf.getInt("bar"))
+
+        // these two do not work right now, because we do not
+        // treat the filename as relative to the including file
+        // if file() is specified, so `include file("bar-file.conf")`
+        // fails.
+        //assertEquals("got bar-file.conf", 44, conf.getInt("bar-file"))
+        //assertEquals("got subdir/baz.conf", 45, conf.getInt("baz"))
+        assertFalse("did not get bar-file.conf", conf.hasPath("bar-file"))
+        assertFalse("did not get subdir/baz.conf", conf.hasPath("baz"))
+    }
+
+    @Test
+    def hasPathOrNullWorks(): Unit = {
+        val conf = ConfigFactory.parseString("x.a=null,x.b=42")
+        assertFalse("hasPath says false for null", conf.hasPath("x.a"))
+        assertTrue("hasPathOrNull says true for null", conf.hasPathOrNull("x.a"))
+
+        assertTrue("hasPath says true for non-null", conf.hasPath("x.b"))
+        assertTrue("hasPathOrNull says true for non-null", conf.hasPathOrNull("x.b"))
+
+        assertFalse("hasPath says false for missing", conf.hasPath("x.c"))
+        assertFalse("hasPathOrNull says false for missing", conf.hasPathOrNull("x.c"))
+
+        // this is to be sure we handle a null along the path correctly
+        assertFalse("hasPath says false for missing under null", conf.hasPath("x.a.y"))
+        assertFalse("hasPathOrNull says false for missing under null", conf.hasPathOrNull("x.a.y"))
+
+        // this is to be sure we handle missing along the path correctly
+        assertFalse("hasPath says false for missing under missing", conf.hasPath("x.c.y"))
+        assertFalse("hasPathOrNull says false for missing under missing", conf.hasPathOrNull("x.c.y"))
+    }
+
+    @Test
+    def getIsNullWorks(): Unit = {
+        val conf = ConfigFactory.parseString("x.a=null,x.b=42")
+
+        assertTrue("getIsNull says true for null", conf.getIsNull("x.a"))
+        assertFalse("getIsNull says false for non-null", conf.getIsNull("x.b"))
+        intercept[ConfigException.Missing] { conf.getIsNull("x.c") }
+        // missing underneath null
+        intercept[ConfigException.Missing] { conf.getIsNull("x.a.y") }
+        // missing underneath missing
+        intercept[ConfigException.Missing] { conf.getIsNull("x.c.y") }
     }
 }

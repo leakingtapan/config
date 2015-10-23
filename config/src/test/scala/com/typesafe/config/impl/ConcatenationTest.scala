@@ -360,12 +360,147 @@ class ConcatenationTest extends TestUtils {
     // to get there, see https://github.com/typesafehub/config/issues/160
     @Test
     def plusEqualsMultipleTimesNestedInPlusEquals() {
-        System.err.println("==============")
         val e = intercept[ConfigException.Parse] {
             val conf = parseConfig("""x += { a += 1, a += 2, a += 3 } """).resolve()
             assertEquals(Seq(1, 2, 3), conf.getObjectList("x").asScala.toVector(0).toConfig.getIntList("a").asScala.toList)
         }
         assertTrue(e.getMessage.contains("limitation"))
-        System.err.println("==============")
+    }
+
+    // from https://github.com/typesafehub/config/issues/177
+    @Test
+    def arrayConcatenationInDoubleNestedDelayedMerge() {
+        val unresolved = parseConfig("""d { x = [] }, c : ${d}, c { x += 1, x += 2 }""")
+        val conf = unresolved.resolve()
+        assertEquals(Seq(1, 2), conf.getIntList("c.x").asScala)
+    }
+
+    // from https://github.com/typesafehub/config/issues/177
+    @Test
+    def arrayConcatenationAsPartOfDelayedMerge() {
+        val unresolved = parseConfig(""" c { x: [], x : ${c.x}[1], x : ${c.x}[2] }""")
+        val conf = unresolved.resolve()
+        assertEquals(Seq(1, 2), conf.getIntList("c.x").asScala)
+    }
+
+    // from https://github.com/typesafehub/config/issues/177
+    @Test
+    def arrayConcatenationInDoubleNestedDelayedMerge2() {
+        val unresolved = parseConfig("""d { x = [] }, c : ${d}, c { x : ${c.x}[1], x : ${c.x}[2] }""")
+        val conf = unresolved.resolve()
+        assertEquals(Seq(1, 2), conf.getIntList("c.x").asScala)
+    }
+
+    // from https://github.com/typesafehub/config/issues/177
+    @Test
+    def arrayConcatenationInTripleNestedDelayedMerge() {
+        val unresolved = parseConfig("""{ r: { d.x=[] }, q: ${r}, q : { d { x = [] }, c : ${q.d}, c { x : ${q.c.x}[1], x : ${q.c.x}[2] } } }""")
+        val conf = unresolved.resolve()
+        assertEquals(Seq(1, 2), conf.getIntList("q.c.x").asScala)
+    }
+
+    @Test
+    def concatUndefinedSubstitutionWithString() {
+        val conf = parseConfig("""a = foo${?bar}""").resolve()
+        assertEquals("foo", conf.getString("a"))
+    }
+
+    @Test
+    def concatDefinedOptionalSubstitutionWithString() {
+        val conf = parseConfig("""bar=bar, a = foo${?bar}""").resolve()
+        assertEquals("foobar", conf.getString("a"))
+    }
+
+    @Test
+    def concatUndefinedSubstitutionWithArray() {
+        val conf = parseConfig("""a = [1] ${?bar}""").resolve()
+        assertEquals(Seq(1), conf.getIntList("a").asScala.toList)
+    }
+
+    @Test
+    def concatDefinedOptionalSubstitutionWithArray() {
+        val conf = parseConfig("""bar=[2], a = [1] ${?bar}""").resolve()
+        assertEquals(Seq(1, 2), conf.getIntList("a").asScala.toList)
+    }
+
+    @Test
+    def concatUndefinedSubstitutionWithObject() {
+        val conf = parseConfig("""a = { x : "foo" } ${?bar}""").resolve()
+        assertEquals("foo", conf.getString("a.x"))
+    }
+
+    @Test
+    def concatDefinedOptionalSubstitutionWithObject() {
+        val conf = parseConfig("""bar={ y : 42 }, a = { x : "foo" } ${?bar}""").resolve()
+        assertEquals("foo", conf.getString("a.x"))
+        assertEquals(42, conf.getInt("a.y"))
+    }
+
+    @Test
+    def concatTwoUndefinedSubstitutions() {
+        val conf = parseConfig("""a = ${?foo}${?bar}""").resolve()
+        assertFalse("no field 'a'", conf.hasPath("a"))
+    }
+
+    @Test
+    def concatSeveralUndefinedSubstitutions() {
+        val conf = parseConfig("""a = ${?foo}${?bar}${?baz}${?woooo}""").resolve()
+        assertFalse("no field 'a'", conf.hasPath("a"))
+    }
+
+    @Test
+    def concatTwoUndefinedSubstitutionsWithASpace() {
+        val conf = parseConfig("""a = ${?foo} ${?bar}""").resolve()
+        assertEquals(" ", conf.getString("a"))
+    }
+
+    @Test
+    def concatTwoDefinedSubstitutionsWithASpace() {
+        val conf = parseConfig("""foo=abc, bar=def, a = ${foo} ${bar}""").resolve()
+        assertEquals("abc def", conf.getString("a"))
+    }
+
+    @Test
+    def concatTwoUndefinedSubstitutionsWithEmptyString() {
+        val conf = parseConfig("""a = ""${?foo}${?bar}""").resolve()
+        assertEquals("", conf.getString("a"))
+    }
+
+    @Test
+    def concatSubstitutionsThatAreObjectsWithNoSpace() {
+        val conf = parseConfig("""foo = { a : 1}, bar = { b : 2 }, x = ${foo}${bar}""").resolve()
+        assertEquals(1, conf.getInt("x.a"))
+        assertEquals(2, conf.getInt("x.b"))
+    }
+
+    // whitespace is insignificant if substitutions don't turn out to be a string
+    @Test
+    def concatSubstitutionsThatAreObjectsWithSpace() {
+        val conf = parseConfig("""foo = { a : 1}, bar = { b : 2 }, x = ${foo} ${bar}""").resolve()
+        assertEquals(1, conf.getInt("x.a"))
+        assertEquals(2, conf.getInt("x.b"))
+    }
+
+    // whitespace is insignificant if substitutions don't turn out to be a string
+    @Test
+    def concatSubstitutionsThatAreListsWithSpace() {
+        val conf = parseConfig("""foo = [1], bar = [2], x = ${foo} ${bar}""").resolve()
+        assertEquals(List(1, 2), conf.getIntList("x").asScala)
+    }
+
+    // but quoted whitespace should be an error
+    @Test
+    def concatSubstitutionsThatAreObjectsWithQuotedSpace() {
+        val e = intercept[ConfigException.WrongType] {
+            parseConfig("""foo = { a : 1}, bar = { b : 2 }, x = ${foo}"  "${bar}""").resolve()
+        }
+    }
+
+    // but quoted whitespace should be an error
+    @Test
+    def concatSubstitutionsThatAreListsWithQuotedSpace() {
+        val e = intercept[ConfigException.WrongType] {
+            parseConfig("""foo = [1], bar = [2], x = ${foo}"  "${bar}""").resolve()
+        }
     }
 }

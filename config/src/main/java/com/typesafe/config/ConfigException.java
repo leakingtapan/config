@@ -322,7 +322,10 @@ public abstract class ConfigException extends RuntimeException implements Serial
             this.problem = problem;
         }
 
-        /** Returns the config setting causing the problem. */
+        /**
+         * Returns the config setting causing the problem.
+         * @return the path of the problem setting
+         */
         public String path() {
             return path;
         }
@@ -330,12 +333,16 @@ public abstract class ConfigException extends RuntimeException implements Serial
         /**
          * Returns where the problem occurred (origin may include info on the
          * file, line number, etc.).
+         * @return the origin of the problem setting
          */
         public ConfigOrigin origin() {
             return origin;
         }
 
-        /** Returns a description of the problem. */
+        /**
+         * Returns a description of the problem.
+         * @return description of the problem
+         */
         public String problem() {
             return problem;
         }
@@ -382,6 +389,22 @@ public abstract class ConfigException extends RuntimeException implements Serial
             sb.setLength(sb.length() - 2); // chop comma and space
 
             return sb.toString();
+        }
+    }
+
+    /**
+     * Some problem with a JavaBean we are trying to initialize.
+     * @since 1.3.0
+     */
+    public static class BadBean extends BugOrBroken {
+        private static final long serialVersionUID = 1L;
+
+        public BadBean(String message, Throwable cause) {
+            super(message, cause);
+        }
+
+        public BadBean(String message) {
+            this(message, null);
         }
     }
 

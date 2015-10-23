@@ -207,6 +207,16 @@ class ConfigSubstitutionTest extends TestUtils {
         assertEquals(2, resolved.getInt("b"))
     }
 
+    @Test
+    def throwOnIncrediblyTrivialCycle() {
+        val s = subst("a")
+        val e = intercept[ConfigException.UnresolvedSubstitution] {
+            val v = resolveWithoutFallbacks(s, parseObject("a: ${a}"))
+        }
+        assertTrue("Wrong exception: " + e.getMessage, e.getMessage().contains("cycle"))
+        assertTrue("Wrong exception: " + e.getMessage, e.getMessage().contains("${a}"))
+    }
+
     private val substCycleObject = {
         parseObject("""
 {
@@ -456,7 +466,8 @@ class ConfigSubstitutionTest extends TestUtils {
     private val delayedMergeObjectResolveProblem5 = {
         parseObject("""
   defaults {
-    a = ${item1.b} // tricky cycle
+    a = ${item1.b} // tricky cycle - we won't see ${defaults}
+                   // as we resolve this
     b = 2
   }
 
@@ -476,9 +487,9 @@ class ConfigSubstitutionTest extends TestUtils {
 
         val resolved = resolveWithoutFallbacks(delayedMergeObjectResolveProblem5)
 
-        assertEquals(2, resolved.getInt("item1.b"))
-        assertEquals(2, resolved.getInt("item2.b"))
-        assertEquals(2, resolved.getInt("defaults.a"))
+        assertEquals("item1.b", 2, resolved.getInt("item1.b"))
+        assertEquals("item2.b", 2, resolved.getInt("item2.b"))
+        assertEquals("defaults.a", 7, resolved.getInt("defaults.a"))
     }
 
     private val delayedMergeObjectResolveProblem6 = {
@@ -913,20 +924,24 @@ class ConfigSubstitutionTest extends TestUtils {
 
     @Test
     def substSelfReferenceIndirect() {
+        // this has two possible outcomes depending on whether
+        // we resolve and memoize a first or b first. currently
+        // java 8's hash table makes it resolve OK, but
+        // it's also allowed to throw an exception.
         val obj = parseObject("""a=1, b=${a}, a=${b}""")
-        val e = intercept[ConfigException.UnresolvedSubstitution] {
-            resolve(obj)
-        }
-        assertTrue("wrong exception: " + e.getMessage, e.getMessage.contains("cycle"))
+        val resolved = resolve(obj)
+        assertEquals(1, resolved.getInt("a"))
     }
 
     @Test
     def substSelfReferenceDoubleIndirect() {
+        // this has two possible outcomes depending on whether we
+        // resolve and memoize a, b, or c first. currently java
+        // 8's hash table makes it resolve OK, but it's also
+        // allowed to throw an exception.
         val obj = parseObject("""a=1, b=${c}, c=${a}, a=${b}""")
-        val e = intercept[ConfigException.UnresolvedSubstitution] {
-            resolve(obj)
-        }
-        assertTrue("wrong exception: " + e.getMessage, e.getMessage.contains("cycle"))
+        val resolved = resolve(obj)
+        assertEquals(1, resolved.getInt("a"))
     }
 
     @Test
@@ -991,7 +1006,7 @@ class ConfigSubstitutionTest extends TestUtils {
 
     @Test
     def substOptionalIndirectSelfReferenceInConcat() {
-        val obj = parseObject("""a=${?b}foo,b=${a}""")
+        val obj = parseObject("""a=${?b}foo,b=${?a}""")
         val resolved = resolve(obj)
         assertEquals("foo", resolved.getString("a"))
     }

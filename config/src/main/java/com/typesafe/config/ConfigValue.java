@@ -40,6 +40,7 @@ public interface ConfigValue extends ConfigMergeable {
      * {@code List<Object>}, or {@code null}, matching the {@link #valueType()}
      * of this {@code ConfigValue}. If the value is a {@link ConfigObject} or
      * {@link ConfigList}, it is recursively unwrapped.
+     * @return a plain Java value corresponding to this ConfigValue
      */
     Object unwrapped();
 
@@ -106,4 +107,16 @@ public interface ConfigValue extends ConfigMergeable {
      * @return a {@code Config} instance containing this value at the given key.
      */
     Config atKey(String key);
+
+    /**
+     * Returns a {@code ConfigValue} based on this one, but with the given
+     * origin. This is useful when you are parsing a new format of file or setting
+     * comments for a single ConfigValue.
+     *
+     * @since 1.3.0
+     *
+     * @param origin the origin set on the returned value
+     * @return the new ConfigValue with the given origin
+     */
+    ConfigValue withOrigin(ConfigOrigin origin);
 }

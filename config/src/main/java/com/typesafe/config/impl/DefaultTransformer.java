@@ -64,7 +64,7 @@ final class DefaultTransformer {
             switch (value.valueType()) {
             case NUMBER: // FALL THROUGH
             case BOOLEAN:
-                return new ConfigString(value.origin(),
+                return new ConfigString.Quoted(value.origin(),
                         value.transformToString());
             case NULL:
                 // want to be sure this throws instead of returning "null" as a
@@ -110,9 +110,7 @@ final class DefaultTransformer {
                             @Override
                             public int compare(Map.Entry<Integer, AbstractConfigValue> a,
                                     Map.Entry<Integer, AbstractConfigValue> b) {
-                                // Integer.compare was added in 1.7 so not using
-                                // it here yet
-                                return Integer.valueOf(a.getKey()).compareTo(b.getKey());
+                                return Integer.compare(a.getKey(), b.getKey());
                             }
                         });
                 // drop the indices (we allow gaps in the indices, for better or
